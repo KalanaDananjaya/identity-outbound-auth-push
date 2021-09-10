@@ -96,16 +96,16 @@ const AuthRequestScreen = ({route, navigation}) => {
                     <Text style={styles.title}>Are you trying to sign in?</Text>
                 </View>
 
-                <View>
+                {/* <View>
                     <View style={[styles.center, styles.connectionCodeView]}>
                         <Text style={[styles.connectionCodeTitle, styles.center]}>
                             Connection Code
                         </Text>
                         <Text style={styles.connectionCode}>
                             {authData.connectionCode} {/* 216 765 */}
-                        </Text>
+                        {/* </Text>
                     </View>
-                </View>
+                </View> */} 
 
                 {/* Information cards */}
                 <View style={styles.infoSection}>

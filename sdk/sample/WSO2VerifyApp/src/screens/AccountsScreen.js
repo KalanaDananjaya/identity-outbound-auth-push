@@ -101,7 +101,7 @@ const AccountsScreen = ({route, navigation}) => {
         activeOpacity={0.9}
         onPress={() => {
           console.log('Add button pressed');
-          navigation.navigate('Add Account');
+          navigation.navigate('QR Scanner');
         }}
         style={styles.addButton}>
         <Image source={require('../assets/img/add-button.png')} />
