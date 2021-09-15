@@ -129,7 +129,9 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
                 getParameter(PushAuthenticatorConstants.LOGIN_HINT));
         context.setSubject(user);
 
-        String sessionDataKey = request.getParameter(InboundConstants.RequestProcessor.CONTEXT_KEY);
+        String sessionDataKey = getContextIdentifier(request);
+        //log.info ("***sessionDataKey**** : " + sessionDataKey);
+
         try {
             List<Device> deviceList;
             deviceList = deviceHandler.listDevices(getUserIdFromUsername(user.getUserName(), getUserRealm(user)));
@@ -154,6 +156,7 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
             // In the default push auth impl, a PushAuthContextCache is implemented and context is stored there
             // But the Identity Framework is not updated to retrieve context from PushAuthContextCache
             // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
+            // this may be need to remove if a local authenticator is used
             AuthenticationContextCache.getInstance().addToCache(
                     new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
 
@@ -234,9 +237,13 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
     @Override
     protected void processAuthenticationResponse(HttpServletRequest httpServletRequest, HttpServletResponse
             httpServletResponse, AuthenticationContext authenticationContext) throws AuthenticationFailedException {
-
+/*
         AuthenticatedUser user = authenticationContext.getSequenceConfig().
                 getStepMap().get(authenticationContext.getCurrentStep() - 1).getAuthenticatedUser();
+*/
+        AuthenticatedUser user = AuthenticatedUser
+                .createLocalAuthenticatedUserFromSubjectIdentifier(httpServletRequest
+                        .getParameter(PushAuthenticatorConstants.LOGIN_HINT));
 
         PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
         AuthenticationContext sessionContext = contextManager.getContext(httpServletRequest

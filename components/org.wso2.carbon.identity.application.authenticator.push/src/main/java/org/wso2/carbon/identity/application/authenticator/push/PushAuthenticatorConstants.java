@@ -101,6 +101,4 @@ public class PushAuthenticatorConstants {
     public static final String AUTH_REQ_ID = "auth_req_id";
     public static final String NONCE = "nonce";
     public static final String LOGIN_HINT = "login_hint";
-
-    public static final String CONSENT_RETRIEVAL_PATH = "/api/openbanking/consent/authorize/retrieve/";
 }
