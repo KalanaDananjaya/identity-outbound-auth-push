@@ -43,7 +43,12 @@ const getPushId = async () => {
     try {
         let value = await AsyncStorage.getItem('pushId');
         pushId = value;
-        console.log('Async pushID: ' + pushId);
+        if (pushId == null) {
+            navigation.navigate('Add Failed due to Push ID being null');
+        }
+        else{
+            console.log('Async pushID: ' + pushId);
+        }
     } catch (e) {
         console.log('No Push ID available');
     }

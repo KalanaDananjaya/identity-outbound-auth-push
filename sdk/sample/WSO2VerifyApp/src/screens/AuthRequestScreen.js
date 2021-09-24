@@ -16,10 +16,11 @@
  * under the License.
  */
 
-import React from 'react';
-import {View, Image, Text, StyleSheet, TouchableOpacity} from 'react-native';
+import React, { useState } from 'react';
+import {View, Image, Text, StyleSheet, TouchableOpacity, ScrollView} from 'react-native';
 import {AuthorizationService} from '@wso2/auth-push-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import BouncyCheckbox from "react-native-bouncy-checkbox";
 
 const storeData = async (authData) => {
     try {
@@ -70,200 +71,327 @@ const getAccountByDeviceId = async (id) => {
     });
 };
 
+
+
+  
+
+
 const AuthRequestScreen = ({route, navigation}) => {
+
     let authData = AuthorizationService.processAuthRequest(route.params);
+    let metadata = JSON.parse(authData.metadata);
+    let consentData = metadata.consentData;
+    let application = metadata.application; //check if it is equal with authData.applicationName
+    let accounts = metadata.accounts;
+    let type = metadata.type;
+    //console.log('authData'+ JSON.stringify(authData));
+    console.log('consentdata' + JSON.stringify(consentData));
+    console.log('accounts' + JSON.stringify(accounts));
     getAccountByDeviceId(route.params.data.deviceId).then((account) => {
         console.log('Got the required account: ' + JSON.stringify(account));
         return account;
     });
 
+    accounts = accounts.map((data)=> {
+        return { "checked": false, "account_id": data.account_id, "display_name": data.display_name}
+    })  
+
+
+    const [checkboxes, setCheckboxes] = useState(accounts);
+  
+    const getSelectedAccountIds = () => {
+        const approved_account_ids=[];
+        checkboxes.map((account_checkbox) =>{
+        if(account_checkbox.checked=== true){
+            approved_account_ids.push(account_checkbox.account_id);
+        }
+        });
+        console.log("approved_account_ids: " + JSON.stringify(approved_account_ids));
+        return approved_account_ids;
+    }
+      
+      
+      const toggleCheckbox = (id, index) => {
+          console.log("checkbox clicked id: "+id)
+          const checkboxData = [...checkboxes];
+          checkboxData[index].checked = !checkboxData[index].checked;
+          setCheckboxes(checkboxData);
+          console.log(`checkbox props: ${JSON.stringify(checkboxes)}`)
+      }
+
+    const checBoxesView = checkboxes.map((account_checkbox, index) => {
+        return (
+          <View style={{flexDirection:"row"}}> 
+              <BouncyCheckbox
+              key={account_checkbox.account_id}
+              isChecked={account_checkbox.checked}
+              text={account_checkbox.display_name}
+              onPress={() => toggleCheckbox(account_checkbox.id, index)}
+              fillColor="green"
+              textStyle={{
+                textDecorationLine: "none",
+              }}
+              />
+          </View>
+        );
+    });
+
+    let organizedConsentData = {"permissions": [], "expiration": {} };
+    consentData.map(function(element, index){
+        if (element.title ==="Permissions"){
+            organizedConsentData.permissions = element.data;
+        }
+        if (element.title ==="Expiration Date Time"){
+            organizedConsentData.expiration = element.data[0];
+            let timestamp = Date.parse(organizedConsentData.expiration);
+            let dateObject = new Date(timestamp);
+
+            organizedConsentData.expiration = {
+                "date": dateObject.toDateString(),
+                "time": dateObject.toTimeString().split(" ")[0]
+            }
+        }
+    });
+
+    let permissionList = organizedConsentData.permissions.map((element) => {
+        return (<Text style={styles.infoCardTextSmall}>- {element}</Text>)
+    })
+    
+    
+
     return (
-        <View>
-            {/* Timer view */}
-            <View/>
+        
+        <ScrollView style={styles.scrollView}>
+            <View style={{ height: '100%' , flex: 1}}>
+                {/* Timer view */}
+                {/* <View/> */}
 
-            {/* Logo view */}
-            <View style={styles.logoView}>
-                <Image
-                    source={require('../assets/img/wso2logo.png')}
-                    style={styles.logo}
-                />
-            </View>
-
-            {/* Auth request information view */}
-            <View>
-                <View style={styles.titleView}>
-                    <Text style={styles.title}>Are you trying to sign in?</Text>
+                {/* Logo view */}
+                <View style={styles.logoView}>
+                    <Image
+                        source={require('../assets/img/wso2logo.png')}
+                        style={styles.logo}
+                    />
                 </View>
 
-                {/* <View>
-                    <View style={[styles.center, styles.connectionCodeView]}>
-                        <Text style={[styles.connectionCodeTitle, styles.center]}>
-                            Connection Code
+                {/* Auth request information view */}
+                <View>
+                    <View style={styles.titleView}>
+                        <Text style={styles.title}>Are you trying to sign in?</Text>
+                    </View>
+
+                    {/* <View>
+                        <View style={[styles.center, styles.connectionCodeView]}>
+                            <Text style={[styles.connectionCodeTitle, styles.center]}>
+                                Connection Code
+                            </Text>
+                            <Text style={styles.connectionCode}>
+                                {authData.connectionCode} {/* 216 765 */}
+                            {/* </Text>
+                        </View>
+                    </View> */} 
+
+                    {/* Information cards */}
+                    <View style={styles.infoSection}>
+
+                        <View style={styles.infoCardSection}>
+                            <View style={styles.infoCardView}>
+                                <Image
+                                    source={require('../assets/img/awesome-user.png')}
+                                    style={styles.infoCardImage}
+                                />
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>
+                                        {authData.displayName}
+                                    </Text>
+                                    <Text style={styles.infoCardTextSmall}>
+                                        {authData.username}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.infoCardView}>
+                                <Image
+                                    source={require('../assets/img/awesome-building.png')}
+                                    style={[styles.infoCardImage, {height: '100%'}]}
+                                />
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>
+                                        {authData.organization}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.infoCardView}>
+                                <Image
+                                    source={require('../assets/img/material-web-asset.png')}
+                                    style={styles.infoCardImage}
+                                />
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>
+                                        {authData.applicationName}
+                                    </Text>
+                                    <Text style={styles.infoCardTextSmall}>
+                                        {authData.applicationUrl}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        <View style={[styles.infoCardSection, {marginTop: '10%'}]}>
+                            <View style={styles.infoCardView}>
+                                <Image
+                                    source={require('../assets/img/material-laptop-mac.png')}
+                                    style={styles.infoCardImage}
+                                />
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>
+                                        {authData.deviceName}
+                                    </Text>
+                                    <Text style={styles.infoCardTextSmall}>
+                                        {authData.browserName}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.infoCardView}>
+                                <Image
+                                    source={require('../assets/img/material-location.png')}
+                                    style={styles.infoCardImage}
+                                />
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>{authData.ipAddress}</Text>
+                                    <Text style={styles.infoCardTextSmall}/>
+                                </View>
+                            </View>
+                            
+
+                            {/* Consent section */}
+                            <View style={styles.infoCardView}>
+                                {/* <Image
+                                    source={require('../assets/img/material-location.png')}
+                                    style={styles.infoCardImage}
+                                /> */}
+
+                                
+                                <View style={styles.infoCardTextView}>
+                                    <Text style={styles.infoCardTextBig}>Requesting the following permissions until</Text>
+                                    <Text style={styles.infoCardTextSmall}> Date : {organizedConsentData.expiration.date}</Text>
+                                    <Text style={styles.infoCardTextSmall}> Time : {organizedConsentData.expiration.time}</Text>
+                                    <View> 
+                                        <Text style={styles.infoCardTextSmall}> Permissions : </Text>
+                                        {permissionList}
+                                    </View>
+                                    <Text style={[styles.infoCardTextBig, {marginTop:'10%', marginBottom: '0%'}]}>{checBoxesView}</Text>
+                                    <Text style={styles.infoCardTextSmall}/>
+                                    
+                                </View>
+                            </View>
+
+
+
+                        </View>
+                    </View>
+                </View>
+
+                <View style={styles.responseButtonContainer}>
+                    <TouchableOpacity
+                        style={styles.responseButton}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                            const approved_account_ids = {
+                                "selectedAccountIds" : getSelectedAccountIds()
+                            }
+                            authData.metadata = approved_account_ids;
+                            AuthorizationService.sendAuthRequest(
+                                authData,
+                                'DENIED',
+                                requestAccount,
+                            )
+                            .then((res) => {
+                                let response = JSON.parse(res);
+                                console.log(
+                                    'Authorization response: ' +
+                                    response.data.authenticationStatus,
+                                );
+
+                                if (response.res == 'OK') {
+                                    console.log(
+                                        'Activity data at success: ' + JSON.stringify(authData),
+                                    );
+                                    storeData(JSON.stringify(authData));
+                                }
+
+                                navigation.navigate(
+                                    response.res == 'OK' ? 'Main' : 'Authorization Failed',
+                                );
+                            })
+                            .catch((err) => {
+                                console.log('Send auth error: ' + err);
+                            });
+                        }}>
+                        <Image source={require('../assets/img/deny-button.png')}/>
+                        <Text style={[styles.responseButtonText, {color: '#DB4234'}]}>
+                            No
                         </Text>
-                        <Text style={styles.connectionCode}>
-                            {authData.connectionCode} {/* 216 765 */}
-                        {/* </Text>
-                    </View>
-                </View> */} 
+                    </TouchableOpacity>
 
-                {/* Information cards */}
-                <View style={styles.infoSection}>
-                    <View style={styles.infoCardSection}>
-                        <View style={styles.infoCardView}>
-                            <Image
-                                source={require('../assets/img/awesome-user.png')}
-                                style={styles.infoCardImage}
-                            />
-                            <View style={styles.infoCardTextView}>
-                                <Text style={styles.infoCardTextBig}>
-                                    {authData.displayName}
-                                </Text>
-                                <Text style={styles.infoCardTextSmall}>
-                                    {authData.username}
-                                </Text>
-                            </View>
-                        </View>
+                    <TouchableOpacity
+                        style={styles.responseButton}
+                        onPress={() => {
+                            console.log('Yes auth response body: ', requestAccount.privateKey);
+                            const approved_account_ids = {
+                                "selectedAccountIds" : getSelectedAccountIds()
+                            }
+                            authData.metadata = approved_account_ids;
+                            AuthorizationService.sendAuthRequest(
+                                authData,
+                                'SUCCESSFUL',
+                                requestAccount,
+                            )
+                            .then((res) => {
+                                let response = JSON.parse(res);
+                                console.log(
+                                    'Authorization response: ' +
+                                    response.data.authenticationStatus,
+                                );
 
-                        <View style={styles.infoCardView}>
-                            <Image
-                                source={require('../assets/img/awesome-building.png')}
-                                style={[styles.infoCardImage, {height: '100%'}]}
-                            />
-                            <View style={styles.infoCardTextView}>
-                                <Text style={styles.infoCardTextBig}>
-                                    {authData.organization}
-                                </Text>
-                            </View>
-                        </View>
+                                if (response.res == 'OK') {
+                                    console.log(
+                                        'Activity data at success: ' + JSON.stringify(authData),
+                                    );
+                                    storeData(JSON.stringify(authData));
+                                }
 
-                        <View style={styles.infoCardView}>
-                            <Image
-                                source={require('../assets/img/material-web-asset.png')}
-                                style={styles.infoCardImage}
-                            />
-                            <View style={styles.infoCardTextView}>
-                                <Text style={styles.infoCardTextBig}>
-                                    {authData.applicationName}
-                                </Text>
-                                <Text style={styles.infoCardTextSmall}>
-                                    {authData.applicationUrl}
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-
-                    <View style={[styles.infoCardSection, {marginTop: '10%'}]}>
-                        <View style={styles.infoCardView}>
-                            <Image
-                                source={require('../assets/img/material-laptop-mac.png')}
-                                style={styles.infoCardImage}
-                            />
-                            <View style={styles.infoCardTextView}>
-                                <Text style={styles.infoCardTextBig}>
-                                    {authData.deviceName}
-                                </Text>
-                                <Text style={styles.infoCardTextSmall}>
-                                    {authData.browserName}
-                                </Text>
-                            </View>
-                        </View>
-
-                        <View style={styles.infoCardView}>
-                            <Image
-                                source={require('../assets/img/material-location.png')}
-                                style={styles.infoCardImage}
-                            />
-                            <View style={styles.infoCardTextView}>
-                                <Text style={styles.infoCardTextBig}>{authData.ipAddress}</Text>
-                                <Text style={styles.infoCardTextSmall}/>
-                            </View>
-                        </View>
-                    </View>
+                                navigation.navigate(
+                                    response.res == 'OK' ? 'Main' : 'Authorization Failed',
+                                );
+                            })
+                            .catch((err) => {
+                                console.log('Send auth error: ' + err);
+                            });
+                        }}
+                        activeOpacity={0.7}>
+                        <Image source={require('../assets/img/accept-button.png')}/>
+                        <Text style={[styles.responseButtonText, {color: '#21AD03'}]}>
+                            Yes
+                        </Text>
+                    </TouchableOpacity>
                 </View>
             </View>
-
-            <View style={styles.responseButtonContainer}>
-                <TouchableOpacity
-                    style={styles.responseButton}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                        AuthorizationService.sendAuthRequest(
-                            authData,
-                            'DENIED',
-                            requestAccount,
-                        )
-                            .then((res) => {
-                                let response = JSON.parse(res);
-                                console.log(
-                                    'Authorization response: ' +
-                                    response.data.authenticationStatus,
-                                );
-
-                                if (response.res == 'OK') {
-                                    console.log(
-                                        'Activity data at success: ' + JSON.stringify(authData),
-                                    );
-                                    storeData(JSON.stringify(authData));
-                                }
-
-                                navigation.navigate(
-                                    response.res == 'OK' ? 'Main' : 'Authorization Failed',
-                                );
-                            })
-                            .catch((err) => {
-                                console.log('Send auth error: ' + err);
-                            });
-                    }}>
-                    <Image source={require('../assets/img/deny-button.png')}/>
-                    <Text style={[styles.responseButtonText, {color: '#DB4234'}]}>
-                        No
-                    </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.responseButton}
-                    onPress={() => {
-                        console.log('Yes auth response body: ', requestAccount.privateKey);
-                        AuthorizationService.sendAuthRequest(
-                            authData,
-                            'SUCCESSFUL',
-                            requestAccount,
-                        )
-                            .then((res) => {
-                                let response = JSON.parse(res);
-                                console.log(
-                                    'Authorization response: ' +
-                                    response.data.authenticationStatus,
-                                );
-
-                                if (response.res == 'OK') {
-                                    console.log(
-                                        'Activity data at success: ' + JSON.stringify(authData),
-                                    );
-                                    storeData(JSON.stringify(authData));
-                                }
-
-                                navigation.navigate(
-                                    response.res == 'OK' ? 'Main' : 'Authorization Failed',
-                                );
-                            })
-                            .catch((err) => {
-                                console.log('Send auth error: ' + err);
-                            });
-                    }}
-                    activeOpacity={0.7}>
-                    <Image source={require('../assets/img/accept-button.png')}/>
-                    <Text style={[styles.responseButtonText, {color: '#21AD03'}]}>
-                        Yes
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        </View>
+            <View style={{height:100}}></View>
+        </ScrollView>
+       
     );
 };
 
 const styles = StyleSheet.create({
+    scrollView: {
+        marginHorizontal: 20,
+        paddingBottom: 20,
+        padding: 10,
+        flex: 1
+      },
     logo: {
         alignSelf: 'center',
         width: '20%',
@@ -306,10 +434,11 @@ const styles = StyleSheet.create({
     },
     infoSection: {
         alignSelf: 'center',
+        height: '80%',
+        width: '90%'
     },
     infoCardSection: {
         alignSelf: 'flex-start',
-        marginLeft: '5%',
     },
     infoCardView: {
         flexDirection: 'row',
@@ -332,15 +461,15 @@ const styles = StyleSheet.create({
         color: '#000',
     },
     infoCardTextSmall: {
+        marginTop: '2%',
         fontFamily: 'Roboto-Regular',
         fontSize: 16,
-        color: '#FD7322',
+        color: '#FD7322',  
     },
     responseButtonContainer: {
         flexDirection: 'row',
         justifyContent: 'space-evenly',
         paddingHorizontal: '10%',
-        marginTop: '5%',
     },
     responseButton: {
         alignItems: 'center',
