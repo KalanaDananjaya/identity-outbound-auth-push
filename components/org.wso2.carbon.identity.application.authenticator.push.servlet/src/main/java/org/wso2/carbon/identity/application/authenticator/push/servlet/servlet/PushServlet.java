@@ -72,7 +72,7 @@ public class PushServlet extends HttpServlet {
     }
 
     /**
-     * Handles authentiPDM-10001cation request received from mobile app.
+     * Handles authentication request received from mobile app.
      *
      * @param request  HTTP request
      * @param response HTTP response
