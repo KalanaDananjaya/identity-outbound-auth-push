@@ -84,6 +84,7 @@ const AuthRequestScreen = ({route, navigation}) => {
     let application = metadata.application; //check if it is equal with authData.applicationName
     let accounts = metadata.accounts;
     let type = metadata.type;
+    let errors = metadata.Errors;
     //console.log('authData'+ JSON.stringify(authData));
     console.log('consentdata' + JSON.stringify(consentData));
     console.log('accounts' + JSON.stringify(accounts));
@@ -99,7 +100,7 @@ const AuthRequestScreen = ({route, navigation}) => {
 
     const [checkboxes, setCheckboxes] = useState(accounts);
   
-    const getSelectedAccountIds = () => {
+    const getApprovedAccountIds = () => {
         const approved_account_ids=[];
         checkboxes.map((account_checkbox) =>{
         if(account_checkbox.checked=== true){
@@ -300,9 +301,9 @@ const AuthRequestScreen = ({route, navigation}) => {
                         activeOpacity={0.7}
                         onPress={() => {
                             const approved_account_ids = {
-                                "selectedAccountIds" : getSelectedAccountIds()
+                                "approvedAccountIds" : getApprovedAccountIds()
                             }
-                            authData.metadata = approved_account_ids;
+                            authData.metadata = JSON.stringify(approved_account_ids);
                             AuthorizationService.sendAuthRequest(
                                 authData,
                                 'DENIED',
@@ -341,9 +342,9 @@ const AuthRequestScreen = ({route, navigation}) => {
                         onPress={() => {
                             console.log('Yes auth response body: ', requestAccount.privateKey);
                             const approved_account_ids = {
-                                "selectedAccountIds" : getSelectedAccountIds()
+                                "approvedAccountIds" : getApprovedAccountIds()
                             }
-                            authData.metadata = approved_account_ids;
+                            authData.metadata = JSON.stringify(approved_account_ids);
                             AuthorizationService.sendAuthRequest(
                                 authData,
                                 'SUCCESSFUL',
