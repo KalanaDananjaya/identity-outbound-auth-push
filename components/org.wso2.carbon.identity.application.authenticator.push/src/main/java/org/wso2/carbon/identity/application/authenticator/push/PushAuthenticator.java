@@ -27,14 +27,10 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.wso2.carbon.identity.application.authentication.framework.AbstractApplicationAuthenticator;
 import org.wso2.carbon.identity.application.authentication.framework.FederatedApplicationAuthenticator;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCache;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheEntry;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheKey;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthenticationContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.AuthenticationFailedException;
 import org.wso2.carbon.identity.application.authentication.framework.inbound.InboundConstants;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
-import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushAuthContextManager;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushJWTValidator;
 import org.wso2.carbon.identity.application.authenticator.push.common.exception.PushAuthTokenValidationException;
@@ -50,27 +46,18 @@ import org.wso2.carbon.identity.application.authenticator.push.internal.PushAuth
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.RequestSender;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.impl.RequestSenderImpl;
 import org.wso2.carbon.identity.application.common.model.Property;
-import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.core.ServiceURLBuilder;
 import org.wso2.carbon.identity.core.URLBuilderException;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
-import org.wso2.carbon.identity.oauth.cache.SessionDataCacheEntry;
-import org.wso2.carbon.identity.oauth.cache.SessionDataCacheKey;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
 
-import org.wso2.carbon.identity.oauth.cache.SessionDataCache;
-
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
 import java.text.ParseException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -203,19 +190,32 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
             throw new AuthenticationFailedException(errorMessage, e);
         }
         if (claimsSet != null) {
-            validateChallenge(claimsSet, serverChallenge, deviceId);
+            if (validator.validateChallenge(claimsSet, serverChallenge, deviceId)) {
+                String authStatus;
+                try {
+                    authStatus =
+                            validator.getClaimFromClaimSet(claimsSet, PushAuthenticatorConstants.TOKEN_RESPONSE, deviceId);
+                }
+                catch (PushAuthTokenValidationException e){
+                    String errorMessage = String.format("Error in getting claim %s from the auth response token received " +
+                            "from device: %s", PushAuthenticatorConstants.TOKEN_SESSION_DATA_KEY, deviceId);
+                    throw new AuthenticationFailedException(errorMessage, e);
+                }
 
-            String authStatus =
-                    getClaimFromClaimSet(claimsSet, PushAuthenticatorConstants.TOKEN_RESPONSE, deviceId);
-
-            if (authStatus.equals(PushAuthenticatorConstants.AUTH_REQUEST_STATUS_SUCCESS)) {
-                authenticationContext.setSubject(user);
-            } else if (authStatus.equals(PushAuthenticatorConstants.AUTH_REQUEST_STATUS_DENIED)) {
-                redirectRetryPage(httpServletResponse, PushAuthenticatorConstants.AUTH_DENIED_PARAM,
-                        PushAuthenticatorConstants.AUTH_DENIED_MESSAGE, user);
+                if (authStatus.equals(PushAuthenticatorConstants.AUTH_REQUEST_STATUS_SUCCESS)) {
+                    authenticationContext.setSubject(user);
+                } else if (authStatus.equals(PushAuthenticatorConstants.AUTH_REQUEST_STATUS_DENIED)) {
+                    redirectRetryPage(httpServletResponse, PushAuthenticatorConstants.AUTH_DENIED_PARAM,
+                            PushAuthenticatorConstants.AUTH_DENIED_MESSAGE, user);
+                } else {
+                    String errorMessage = String.format("Authentication failed! Auth status for user" +
+                            " '%s' is not available in JWT.", user.toFullQualifiedUsername());
+                    throw new AuthenticationFailedException(errorMessage);
+                }
             } else {
-                String errorMessage = String.format("Authentication failed! Auth status for user" +
-                        " '%s' is not available in JWT.", user.toFullQualifiedUsername());
+                String errorMessage = String
+                        .format("Authentication failed! JWT challenge validation for device: %s of user: %s.",
+                                deviceId, user);
                 throw new AuthenticationFailedException(errorMessage);
             }
         } else {
@@ -225,8 +225,15 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
             throw new AuthenticationFailedException(errorMessage);
         }
 
-        contextManager.clearContext(getClaimFromClaimSet(claimsSet,
-                PushAuthenticatorConstants.TOKEN_SESSION_DATA_KEY, deviceId));
+        try{
+            contextManager.clearContext(validator.getClaimFromClaimSet(claimsSet,
+                    PushAuthenticatorConstants.TOKEN_SESSION_DATA_KEY, deviceId));
+        }
+        catch (PushAuthTokenValidationException e){
+            String errorMessage = String.format("Error in getting claim %s from the auth response token received " +
+                    "from device: %s", PushAuthenticatorConstants.TOKEN_SESSION_DATA_KEY, deviceId);
+            throw new AuthenticationFailedException(errorMessage, e);
+        }
     }
 
     @Override
@@ -277,33 +284,6 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
                 getParameter(PushAuthenticatorConstants.LOGIN_HINT));
     }
 
-
-    /**
-     * Validate the correlation between the challenged saved in the server and received from the auth response.
-     *
-     * @param claimsSet JWT claim set for the validated auth response token
-     * @param challenge Challenge stored in cache to correlate with JWT
-     * @param deviceId  Unique ID for the device trying to authenticate the user
-     * @throws AuthenticationFailedException if the jwt fails to parse when getting the challenge claim
-     */
-    private void validateChallenge(JWTClaimsSet claimsSet, String challenge, String deviceId)
-            throws AuthenticationFailedException {
-
-        if (claimsSet != null) {
-            String tokenChallenge =
-                    getClaimFromClaimSet(claimsSet, PushAuthenticatorConstants.TOKEN_CHALLENGE, deviceId);
-            if (!tokenChallenge.equals(challenge)) {
-                String errorMessage = String
-                        .format("Authentication failed! Challenge received from %s  was not valid.", deviceId);
-                throw new AuthenticationFailedException(errorMessage);
-            }
-        } else {
-            String errorMessage = String
-                    .format("Authentication failed! JWT claim set received from device %s  was null.", deviceId);
-            throw new AuthenticationFailedException(errorMessage);
-        }
-    }
-
     /**
      * Get the user realm for the authenticated user.
      *
@@ -342,26 +322,6 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
         return userStoreManager.getUserIDFromUserName(username);
     }
 
-    /**
-     * Get JWT claim from the claim set.
-     *
-     * @param claimsSet JWT claim set
-     * @param claim     Required claim
-     * @param deviceId  Device ID
-     * @return Claim string
-     * @throws AuthenticationFailedException if an error occurs while getting a claim
-     */
-    protected String getClaimFromClaimSet(JWTClaimsSet claimsSet, String claim, String deviceId)
-            throws AuthenticationFailedException {
-
-        try {
-            return claimsSet.getStringClaim(claim);
-        } catch (ParseException e) {
-            String errorMessage = String.format("Failed to get %s from the auth response token received from device: "
-                    + "%s.", claim, deviceId);
-            throw new AuthenticationFailedException(errorMessage, e);
-        }
-    }
 
     /**
      * Derive the Device ID from the auth response token header.
