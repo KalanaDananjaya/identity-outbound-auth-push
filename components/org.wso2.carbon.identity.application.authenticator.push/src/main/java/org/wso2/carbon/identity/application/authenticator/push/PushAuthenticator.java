@@ -114,9 +114,7 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
         DeviceHandler deviceHandler = new DeviceHandlerImpl();
         PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
 
-        // In OB CIBA, only this Push Authenticator IDP is expected to be executed during the CIBA auth flow
-        // Hence, the login_hint attribute in the CIBA request object is used to identify the user
-        AuthenticatedUser user = getAuthenticatedUser(context, request);
+        AuthenticatedUser user = getAuthenticatedUser(request);
 
         context.setSubject(user);
         String sessionDataKey = request.getParameter(InboundConstants.RequestProcessor.CONTEXT_KEY);
@@ -174,14 +172,6 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
         }
 
     }
-
-    protected AuthenticatedUser getAuthenticatedUser(AuthenticationContext context, HttpServletRequest request){
-        /*AuthenticatedUser user = context.getSequenceConfig().getStepMap(). *IS*
-        get(context.getCurrentStep() - 1).getAuthenticatedUser();*/
-        return AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(request.
-                getParameter(PushAuthenticatorConstants.LOGIN_HINT));
-    }
-
 
     @Override
     protected void processAuthenticationResponse(HttpServletRequest httpServletRequest, HttpServletResponse
@@ -264,6 +254,29 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
         configProperties.add(fcmUrlProperty);
         return configProperties;
     }
+
+    /**
+     * Get the authenticated user
+     *
+     * @param request Push authenticator HTTP request
+     * @return Authenticated User
+     */
+    protected AuthenticatedUser getAuthenticatedUser(HttpServletRequest request){
+
+//        String sessionDataKey = request.getParameter(InboundConstants.RequestProcessor.CONTEXT_KEY);
+//
+//        PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
+//        AuthenticationContext context = contextManager.getContext(sessionDataKey);
+//
+//        return context.getSequenceConfig().getStepMap().get(context.getCurrentStep() - 1)
+//                .getAuthenticatedUser();
+
+        // In OB CIBA, only this Push Authenticator IDP is expected to be executed during the CIBA auth flow
+        // Hence, the login_hint attribute in the CIBA request object is used to identify the user
+        return AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(request.
+                getParameter(PushAuthenticatorConstants.LOGIN_HINT));
+    }
+
 
     /**
      * Validate the correlation between the challenged saved in the server and received from the auth response.

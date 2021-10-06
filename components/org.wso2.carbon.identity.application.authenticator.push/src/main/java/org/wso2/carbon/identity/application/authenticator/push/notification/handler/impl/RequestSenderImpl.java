@@ -90,13 +90,7 @@ public class RequestSenderImpl implements RequestSender {
         Device device = getDevice(deviceId);
         PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
         AuthenticationContext context = contextManager.getContext(key);
-
-        // OB specific change to use login_hint attribute in the CIBA request object
-        // as the authenticated user
-        /*AuthenticatedUser user = context.getSequenceConfig().getStepMap().
-                get(context.getCurrentStep() - 1).getAuthenticatedUser();*/
-        AuthenticatedUser user = AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(request.
-                getParameter(PushAuthenticatorConstants.LOGIN_HINT));
+        AuthenticatedUser user = context.getSubject();
 
         Map<String, String> authenticatorProperties = context.getAuthenticatorProperties();
         String serverKey = authenticatorProperties.get(PushAuthenticatorConstants.SERVER_KEY);
@@ -111,8 +105,6 @@ public class RequestSenderImpl implements RequestSender {
         String pushId = device.getPushId();
         String fullName = getFullName(user);
         String organization = user.getTenantDomain();
-
-        // OB specific change to retrieve consent data
         String metadata = setMetadata(key);
 
         String userOS = null;
@@ -256,7 +248,6 @@ public class RequestSenderImpl implements RequestSender {
         PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
         AuthenticationContext context = contextManager.getContext(sessionDataKey);
 
-        /* OB Start */
         // update the authentication context with required values for OB specific requirements
         try {
             String queryParams = FrameworkUtils
@@ -279,8 +270,6 @@ public class RequestSenderImpl implements RequestSender {
         // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
         AuthenticationContextCache.getInstance().addToCache(
                 new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
-
-        /* OB End */
 
         return retrieveConsent(sessionDataKey);
     }
@@ -312,6 +301,8 @@ public class RequestSenderImpl implements RequestSender {
 
     /**
      * Returns a map of query parameters from the given query param string.
+     * @param queryParamsString HTTP request query parameters
+     * @return Query parameter map
      */
     private Map<String, String> splitQuery(String queryParamsString) throws UnsupportedEncodingException {
         final Map<String, String> queryParams = new HashMap<>();
@@ -326,6 +317,11 @@ public class RequestSenderImpl implements RequestSender {
         return queryParams;
     }
 
+    /**
+     * Retrieve consent from OB database
+     * @param sessionDataKey Session Data Key
+     * @return Response of consent retrieval request
+     */
     private String retrieveConsent(String sessionDataKey) throws PushAuthenticatorException {
 
         String hostName = ServerConfiguration.getInstance().getFirstProperty("HostName");
@@ -370,7 +366,7 @@ public class RequestSenderImpl implements RequestSender {
             log.debug("Error in consent data retrieval response");
             throw new PushAuthenticatorException("Failed to retrieve consent data");
         } else {
-            String consentData= null;
+            String consentData;
             try {
                 consentData = IOUtils.toString(consentDataResponse.getEntity().getContent(),
                         String.valueOf(StandardCharsets.UTF_8));
