@@ -28,10 +28,14 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.wso2.carbon.base.ServerConfiguration;
 import org.wso2.carbon.context.CarbonContext;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCache;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheEntry;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheKey;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthenticationContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.AuthenticationFailedException;
 import org.wso2.carbon.identity.application.authentication.framework.inbound.InboundConstants;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.authenticator.push.PushAuthenticatorConstants;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushAuthContextManager;
 import org.wso2.carbon.identity.application.authenticator.push.common.impl.PushAuthContextManagerImpl;
@@ -45,8 +49,12 @@ import org.wso2.carbon.identity.application.authenticator.push.exception.PushAut
 import org.wso2.carbon.identity.application.authenticator.push.internal.PushAuthenticatorServiceDataHolder;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.FirebasePushNotificationSender;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.RequestSender;
+import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCache;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCacheEntry;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCacheKey;
 import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.api.UserStoreException;
@@ -57,9 +65,12 @@ import ua_parser.Client;
 import ua_parser.Parser;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import javax.servlet.http.HttpServletRequest;
@@ -102,7 +113,7 @@ public class RequestSenderImpl implements RequestSender {
         String organization = user.getTenantDomain();
 
         // OB specific change to retrieve consent data
-        String consentInfo = retrieveConsent(key);
+        String metadata = setMetadata(key);
 
         String userOS = null;
         String userBrowser = null;
@@ -121,7 +132,7 @@ public class RequestSenderImpl implements RequestSender {
         pushNotificationSender.init(serverKey, fcmUrl);
         try {
             pushNotificationSender.sendPushNotification(deviceId, pushId, message, randomChallenge, sessionDataKey,
-                    username, fullName, organization, serviceProviderName, hostname, userOS, userBrowser, consentInfo);
+                    username, fullName, organization, serviceProviderName, hostname, userOS, userBrowser, metadata);
         } catch (AuthenticationFailedException e) {
             throw new PushAuthenticatorException("Error occurred when trying to send the push notification to device: "
                     + deviceId + ".", e);
@@ -240,7 +251,82 @@ public class RequestSenderImpl implements RequestSender {
      * @return consent data
      * @throws PushAuthenticatorException
      */
-    public String retrieveConsent(String sessionDataKey) throws PushAuthenticatorException {
+    private String setMetadata(String sessionDataKey) throws PushAuthenticatorException {
+
+        PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
+        AuthenticationContext context = contextManager.getContext(sessionDataKey);
+
+        /* OB Start */
+        // update the authentication context with required values for OB specific requirements
+        try {
+            String queryParams = FrameworkUtils
+                    .getQueryStringWithFrameworkContextId(context.getQueryParams(), context.getCallerSessionKey(),
+                            context.getContextIdentifier());
+            Map<String, String> params = splitQuery(queryParams);
+            handlePreConsent(context, params);
+        } catch (UnsupportedEncodingException e) {
+            throw new PushAuthenticatorException("Error occurred when processing the request object", e);
+        }
+
+        SessionDataCacheKey cacheKey = new SessionDataCacheKey(sessionDataKey);
+        SessionDataCacheEntry cacheEntry = SessionDataCache.getInstance().getValueFromCache(cacheKey);
+        cacheEntry.setLoggedInUser(context.getSubject());
+        SessionDataCache.getInstance().addToCache(cacheKey, cacheEntry);
+
+        // OB specific change to add context to authenticationContextCache
+        // In the default push auth impl, a PushAuthContextCache is implemented and context is stored there
+        // But the Identity Framework is not updated to retrieve context from PushAuthContextCache
+        // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
+        AuthenticationContextCache.getInstance().addToCache(
+                new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
+
+        /* OB End */
+
+        return retrieveConsent(sessionDataKey);
+    }
+
+    /**
+     * set attributes to context which will be required to prompt the consent page.
+     *
+     * @param context authentication context
+     * @param  params query params
+     */
+    @SuppressWarnings(value = "unchecked")
+    private void handlePreConsent(AuthenticationContext context, Map<String, String> params) {
+
+        ServiceProvider serviceProvider = context.getSequenceConfig().getApplicationConfig().getServiceProvider();
+
+        context.addEndpointParam(PushAuthenticatorConstants.LOGGED_IN_USER,
+                params.get(PushAuthenticatorConstants.LOGIN_HINT));
+        context.addEndpointParam(PushAuthenticatorConstants.USER_TENANT_DOMAIN,
+                "@carbon.super");
+        context.addEndpointParam(PushAuthenticatorConstants.REQUEST,
+                params.get(PushAuthenticatorConstants.REQUEST_OBJECT));
+        context.addEndpointParam(PushAuthenticatorConstants.SCOPE,
+                params.get(PushAuthenticatorConstants.SCOPE));
+        context.addEndpointParam(PushAuthenticatorConstants.APPLICATION, serviceProvider.getApplicationName());
+        context.addEndpointParam(PushAuthenticatorConstants.CONSENT_PROMPTED, true);
+        context.addEndpointParam(PushAuthenticatorConstants.AUTH_REQ_ID,
+                context.getAuthenticationRequest().getRequestQueryParams().get(PushAuthenticatorConstants.NONCE)[0]);
+    }
+
+    /**
+     * Returns a map of query parameters from the given query param string.
+     */
+    private Map<String, String> splitQuery(String queryParamsString) throws UnsupportedEncodingException {
+        final Map<String, String> queryParams = new HashMap<>();
+        final String[] pairs = queryParamsString.split("&");
+        for (String pair : pairs) {
+            final int idx = pair.indexOf("=");
+            final String key = idx > 0 ? URLDecoder.decode(pair.substring(0, idx), "UTF-8") : pair;
+            final String value =
+                    idx > 0 && pair.length() > idx + 1 ? URLDecoder.decode(pair.substring(idx + 1), "UTF-8") : null;
+            queryParams.put(key, value);
+        }
+        return queryParams;
+    }
+
+    private String retrieveConsent(String sessionDataKey) throws PushAuthenticatorException {
 
         String hostName = ServerConfiguration.getInstance().getFirstProperty("HostName");
         int defaultPort = 9443;

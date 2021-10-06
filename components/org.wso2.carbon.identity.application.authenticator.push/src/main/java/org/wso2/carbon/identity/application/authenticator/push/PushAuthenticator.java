@@ -111,34 +111,17 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
     protected void initiateAuthenticationRequest(HttpServletRequest request, HttpServletResponse response,
                                                  AuthenticationContext context) throws AuthenticationFailedException {
 
-        // update the authentication context with required values for OB specific requirements
-        try {
-        String queryParams = FrameworkUtils
-                .getQueryStringWithFrameworkContextId(context.getQueryParams(), context.getCallerSessionKey(),
-                        context.getContextIdentifier());
-        Map<String, String> params = splitQuery(queryParams);
-        handlePreConsent(context, params);
-        } catch (UnsupportedEncodingException e) {
-            throw new AuthenticationFailedException("Error occurred when processing the request object", e);
-        }
-
         DeviceHandler deviceHandler = new DeviceHandlerImpl();
         PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
 
         // In OB CIBA, only this Push Authenticator IDP is expected to be executed during the CIBA auth flow
         // Hence, the login_hint attribute in the CIBA request object is used to identify the user
-        /*AuthenticatedUser user = context.getSequenceConfig().getStepMap().
-                get(context.getCurrentStep() - 1).getAuthenticatedUser();*/
-        AuthenticatedUser user = AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(request.
-                getParameter(PushAuthenticatorConstants.LOGIN_HINT));
-        context.setSubject(user);
+        AuthenticatedUser user = getAuthenticatedUser(context, request);
 
+        context.setSubject(user);
         String sessionDataKey = request.getParameter(InboundConstants.RequestProcessor.CONTEXT_KEY);
 
-        SessionDataCacheKey cacheKey = new SessionDataCacheKey(sessionDataKey);
-        SessionDataCacheEntry cacheEntry = SessionDataCache.getInstance().getValueFromCache(cacheKey);
-        cacheEntry.setLoggedInUser(user);
-        SessionDataCache.getInstance().addToCache(cacheKey, cacheEntry);
+
         try {
             List<Device> deviceList;
             deviceList = deviceHandler.listDevices(getUserIdFromUsername(user.getUserName(), getUserRealm(user)));
@@ -158,13 +141,6 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
             AuthDataDTO authDataDTO = new AuthDataDTO();
             context.setProperty(PushAuthenticatorConstants.CONTEXT_AUTH_DATA, authDataDTO);
             contextManager.storeContext(sessionDataKey, context);
-
-            // OB specific change to add context to authenticationContextCache
-            // In the default push auth impl, a PushAuthContextCache is implemented and context is stored there
-            // But the Identity Framework is not updated to retrieve context from PushAuthContextCache
-            // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
-            AuthenticationContextCache.getInstance().addToCache(
-                    new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
 
             if (deviceList.size() == 1) {
                 RequestSender requestSender = new RequestSenderImpl();
@@ -199,46 +175,13 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
 
     }
 
-    /**
-     * set attributes to context which will be required to prompt the consent page.
-     *
-     * @param context authentication context
-    * @param  params query params
-     */
-    @SuppressWarnings(value = "unchecked")
-    private void handlePreConsent(AuthenticationContext context, Map<String, String> params) {
-
-        ServiceProvider serviceProvider = context.getSequenceConfig().getApplicationConfig().getServiceProvider();
-
-        context.addEndpointParam(PushAuthenticatorConstants.LOGGED_IN_USER,
-               params.get(PushAuthenticatorConstants.LOGIN_HINT));
-        context.addEndpointParam(PushAuthenticatorConstants.USER_TENANT_DOMAIN,
-                "@carbon.super");
-        context.addEndpointParam(PushAuthenticatorConstants.REQUEST,
-                params.get(PushAuthenticatorConstants.REQUEST_OBJECT));
-        context.addEndpointParam(PushAuthenticatorConstants.SCOPE,
-                params.get(PushAuthenticatorConstants.SCOPE));
-        context.addEndpointParam(PushAuthenticatorConstants.APPLICATION, serviceProvider.getApplicationName());
-        context.addEndpointParam(PushAuthenticatorConstants.CONSENT_PROMPTED, true);
-        context.addEndpointParam(PushAuthenticatorConstants.AUTH_REQ_ID,
-                context.getAuthenticationRequest().getRequestQueryParams().get(PushAuthenticatorConstants.NONCE)[0]);
+    protected AuthenticatedUser getAuthenticatedUser(AuthenticationContext context, HttpServletRequest request){
+        /*AuthenticatedUser user = context.getSequenceConfig().getStepMap(). *IS*
+        get(context.getCurrentStep() - 1).getAuthenticatedUser();*/
+        return AuthenticatedUser.createLocalAuthenticatedUserFromSubjectIdentifier(request.
+                getParameter(PushAuthenticatorConstants.LOGIN_HINT));
     }
 
-    /**
-     * Returns a map of query parameters from the given query param string.
-     */
-    private Map<String, String> splitQuery(String queryParamsString) throws UnsupportedEncodingException {
-        final Map<String, String> queryParams = new HashMap<>();
-        final String[] pairs = queryParamsString.split("&");
-        for (String pair : pairs) {
-            final int idx = pair.indexOf("=");
-            final String key = idx > 0 ? URLDecoder.decode(pair.substring(0, idx), "UTF-8") : pair;
-            final String value =
-                    idx > 0 && pair.length() > idx + 1 ? URLDecoder.decode(pair.substring(idx + 1), "UTF-8") : null;
-            queryParams.put(key, value);
-        }
-        return queryParams;
-    }
 
     @Override
     protected void processAuthenticationResponse(HttpServletRequest httpServletRequest, HttpServletResponse
