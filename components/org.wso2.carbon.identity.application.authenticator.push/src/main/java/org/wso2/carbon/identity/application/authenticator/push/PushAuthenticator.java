@@ -21,16 +21,27 @@ package org.wso2.carbon.identity.application.authenticator.push;
 
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.JWTParser;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
+import org.wso2.carbon.base.ServerConfiguration;
+import org.wso2.carbon.context.CarbonContext;
 import org.wso2.carbon.identity.application.authentication.framework.AbstractApplicationAuthenticator;
 import org.wso2.carbon.identity.application.authentication.framework.FederatedApplicationAuthenticator;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCache;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheEntry;
+import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheKey;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthenticationContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.AuthenticationFailedException;
 import org.wso2.carbon.identity.application.authentication.framework.inbound.InboundConstants;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
+import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushAuthContextManager;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushJWTValidator;
 import org.wso2.carbon.identity.application.authenticator.push.common.exception.PushAuthTokenValidationException;
@@ -46,18 +57,26 @@ import org.wso2.carbon.identity.application.authenticator.push.internal.PushAuth
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.RequestSender;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.impl.RequestSenderImpl;
 import org.wso2.carbon.identity.application.common.model.Property;
+import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.core.ServiceURLBuilder;
 import org.wso2.carbon.identity.core.URLBuilderException;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCache;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCacheEntry;
+import org.wso2.carbon.identity.oauth.cache.SessionDataCacheKey;
+import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.core.common.AbstractUserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -129,7 +148,8 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
 
             if (deviceList.size() == 1) {
                 RequestSender requestSender = new RequestSenderImpl();
-                requestSender.sendRequest(request, response, deviceList.get(0).getDeviceId(), sessionDataKey);
+                String metadata = setMetadata(sessionDataKey);
+                requestSender.sendRequest(request, response, deviceList.get(0).getDeviceId(), sessionDataKey, metadata);
                 redirectWaitPage(response, sessionDataKey, user);
             } else if (deviceList.size() == 0) {
                 if (log.isDebugEnabled()) {
@@ -440,6 +460,150 @@ public class PushAuthenticator extends AbstractApplicationAuthenticator
             String errorMessage = String.format("Error occurred when trying to to redirect user: %s to the retry page.",
                     user.toFullQualifiedUsername());
             throw new AuthenticationFailedException(errorMessage, e);
+        }
+    }
+
+
+
+
+    /**
+     * OB specific implementation to retrieve consent data
+     * @param sessionDataKey
+     * @return consent data
+     * @throws PushAuthenticatorException
+     */
+    protected String setMetadata(String sessionDataKey) throws PushAuthenticatorException {
+
+        PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
+        AuthenticationContext context = contextManager.getContext(sessionDataKey);
+
+        // update the authentication context with required values for OB specific requirements
+        try {
+            String queryParams = FrameworkUtils
+                    .getQueryStringWithFrameworkContextId(context.getQueryParams(), context.getCallerSessionKey(),
+                            context.getContextIdentifier());
+            Map<String, String> params = splitQuery(queryParams);
+            handlePreConsent(context, params);
+        } catch (UnsupportedEncodingException e) {
+            throw new PushAuthenticatorException("Error occurred when processing the request object", e);
+        }
+
+        SessionDataCacheKey cacheKey = new SessionDataCacheKey(sessionDataKey);
+        SessionDataCacheEntry cacheEntry = SessionDataCache.getInstance().getValueFromCache(cacheKey);
+        cacheEntry.setLoggedInUser(context.getSubject());
+        SessionDataCache.getInstance().addToCache(cacheKey, cacheEntry);
+
+        // OB specific change to add context to authenticationContextCache
+        // In the default push auth impl, a PushAuthContextCache is implemented and context is stored there
+        // But the Identity Framework is not updated to retrieve context from PushAuthContextCache
+        // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
+        AuthenticationContextCache.getInstance().addToCache(
+                new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
+
+        return retrieveConsent(sessionDataKey);
+    }
+
+    /**
+     * set attributes to context which will be required to prompt the consent page.
+     *
+     * @param context authentication context
+     * @param  params query params
+     */
+    @SuppressWarnings(value = "unchecked")
+    private void handlePreConsent(AuthenticationContext context, Map<String, String> params) {
+
+        ServiceProvider serviceProvider = context.getSequenceConfig().getApplicationConfig().getServiceProvider();
+
+        context.addEndpointParam(PushAuthenticatorConstants.LOGGED_IN_USER,
+                params.get(PushAuthenticatorConstants.LOGIN_HINT));
+        context.addEndpointParam(PushAuthenticatorConstants.USER_TENANT_DOMAIN,
+                "@carbon.super");
+        context.addEndpointParam(PushAuthenticatorConstants.REQUEST,
+                params.get(PushAuthenticatorConstants.REQUEST_OBJECT));
+        context.addEndpointParam(PushAuthenticatorConstants.SCOPE,
+                params.get(PushAuthenticatorConstants.SCOPE));
+        context.addEndpointParam(PushAuthenticatorConstants.APPLICATION, serviceProvider.getApplicationName());
+        context.addEndpointParam(PushAuthenticatorConstants.CONSENT_PROMPTED, true);
+        context.addEndpointParam(PushAuthenticatorConstants.AUTH_REQ_ID,
+                context.getAuthenticationRequest().getRequestQueryParams().get(PushAuthenticatorConstants.NONCE)[0]);
+    }
+
+    /**
+     * Returns a map of query parameters from the given query param string.
+     * @param queryParamsString HTTP request query parameters
+     * @return Query parameter map
+     */
+    protected Map<String, String> splitQuery(String queryParamsString) throws UnsupportedEncodingException {
+        final Map<String, String> queryParams = new HashMap<>();
+        final String[] pairs = queryParamsString.split("&");
+        for (String pair : pairs) {
+            final int idx = pair.indexOf("=");
+            final String key = idx > 0 ? URLDecoder.decode(pair.substring(0, idx), "UTF-8") : pair;
+            final String value =
+                    idx > 0 && pair.length() > idx + 1 ? URLDecoder.decode(pair.substring(idx + 1), "UTF-8") : null;
+            queryParams.put(key, value);
+        }
+        return queryParams;
+    }
+
+    /**
+     * Retrieve consent from OB database
+     * @param sessionDataKey Session Data Key
+     * @return Response of consent retrieval request
+     */
+    private String retrieveConsent(String sessionDataKey) throws PushAuthenticatorException {
+
+        String hostName = ServerConfiguration.getInstance().getFirstProperty("HostName");
+        int defaultPort = 9443;
+        int port =  defaultPort + Integer.parseInt(ServerConfiguration.getInstance()
+                .getFirstProperty("Ports.Offset"));
+
+        String retrieveUrl = "https://" + hostName + ":" +port +
+                PushAuthenticatorConstants.CONSENT_RETRIEVAL_PATH + sessionDataKey;
+
+        ServerConfiguration.getInstance().getFirstProperty("Ports.Offset");
+
+        String adminUsername;
+        char[] adminPassword;
+        try {
+            RealmConfiguration realmConfiguration = CarbonContext.getThreadLocalCarbonContext().getUserRealm()
+                    .getRealmConfiguration();
+            adminUsername = realmConfiguration.getAdminUserName();
+            adminPassword = realmConfiguration.getAdminPassword().toCharArray();
+        } catch (UserStoreException e) {
+            log.debug("Failed to retrieve admin credentials");
+            throw new PushAuthenticatorException("Failed to retrieve admin credentials");
+        }
+
+        String credentials = adminUsername + ":" + String.valueOf(adminPassword);
+        credentials = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+
+        CloseableHttpClient client = HttpClientBuilder.create().build();
+        HttpGet dataRequest = new HttpGet(retrieveUrl);
+        dataRequest.addHeader("Authorization", "Basic " + credentials);
+        HttpResponse consentDataResponse = null;
+        try {
+            consentDataResponse = client.execute(dataRequest);
+        } catch (IOException e) {
+            log.debug("Failed to retrieve consent data");
+            throw new PushAuthenticatorException("Failed to retrieve consent data", e);
+        }
+        log.debug("HTTP response for consent retrieval" + consentDataResponse.toString());
+
+        if (consentDataResponse.getStatusLine().getStatusCode() == HttpURLConnection.HTTP_MOVED_TEMP &&
+                consentDataResponse.getLastHeader("Location") != null) {
+            log.debug("Error in consent data retrieval response");
+            throw new PushAuthenticatorException("Failed to retrieve consent data");
+        } else {
+            String consentData;
+            try {
+                consentData = IOUtils.toString(consentDataResponse.getEntity().getContent(),
+                        String.valueOf(StandardCharsets.UTF_8));
+                return consentData;
+            } catch (IOException e) {
+                log.debug("Error in reading consent data retrieval response");
+                throw new PushAuthenticatorException("Failed to read the consent data");
+            }
         }
     }
 

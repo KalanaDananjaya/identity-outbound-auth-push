@@ -84,7 +84,7 @@ public class RequestSenderImpl implements RequestSender {
     private static final Log log = LogFactory.getLog(RequestSenderImpl.class);
 
     @Override
-    public void sendRequest(HttpServletRequest request, HttpServletResponse response, String deviceId, String key)
+    public void sendRequest(HttpServletRequest request, HttpServletResponse response, String deviceId, String key, String metadata)
             throws PushAuthenticatorException, AuthenticationFailedException {
 
         Device device = getDevice(deviceId);
@@ -105,7 +105,6 @@ public class RequestSenderImpl implements RequestSender {
         String pushId = device.getPushId();
         String fullName = getFullName(user);
         String organization = user.getTenantDomain();
-        String metadata = setMetadata(key);
 
         String userOS = null;
         String userBrowser = null;
@@ -237,144 +236,5 @@ public class RequestSenderImpl implements RequestSender {
         }
     }
 
-    /**
-     * OB specific implementation to retrieve consent data
-     * @param sessionDataKey
-     * @return consent data
-     * @throws PushAuthenticatorException
-     */
-    private String setMetadata(String sessionDataKey) throws PushAuthenticatorException {
 
-        PushAuthContextManager contextManager = new PushAuthContextManagerImpl();
-        AuthenticationContext context = contextManager.getContext(sessionDataKey);
-
-        // update the authentication context with required values for OB specific requirements
-        try {
-            String queryParams = FrameworkUtils
-                    .getQueryStringWithFrameworkContextId(context.getQueryParams(), context.getCallerSessionKey(),
-                            context.getContextIdentifier());
-            Map<String, String> params = splitQuery(queryParams);
-            handlePreConsent(context, params);
-        } catch (UnsupportedEncodingException e) {
-            throw new PushAuthenticatorException("Error occurred when processing the request object", e);
-        }
-
-        SessionDataCacheKey cacheKey = new SessionDataCacheKey(sessionDataKey);
-        SessionDataCacheEntry cacheEntry = SessionDataCache.getInstance().getValueFromCache(cacheKey);
-        cacheEntry.setLoggedInUser(context.getSubject());
-        SessionDataCache.getInstance().addToCache(cacheKey, cacheEntry);
-
-        // OB specific change to add context to authenticationContextCache
-        // In the default push auth impl, a PushAuthContextCache is implemented and context is stored there
-        // But the Identity Framework is not updated to retrieve context from PushAuthContextCache
-        // Hence, this is added to store the context in AuthenticationContextCache under sessionDataKey used here
-        AuthenticationContextCache.getInstance().addToCache(
-                new AuthenticationContextCacheKey(sessionDataKey), new AuthenticationContextCacheEntry(context));
-
-        return retrieveConsent(sessionDataKey);
-    }
-
-    /**
-     * set attributes to context which will be required to prompt the consent page.
-     *
-     * @param context authentication context
-     * @param  params query params
-     */
-    @SuppressWarnings(value = "unchecked")
-    private void handlePreConsent(AuthenticationContext context, Map<String, String> params) {
-
-        ServiceProvider serviceProvider = context.getSequenceConfig().getApplicationConfig().getServiceProvider();
-
-        context.addEndpointParam(PushAuthenticatorConstants.LOGGED_IN_USER,
-                params.get(PushAuthenticatorConstants.LOGIN_HINT));
-        context.addEndpointParam(PushAuthenticatorConstants.USER_TENANT_DOMAIN,
-                "@carbon.super");
-        context.addEndpointParam(PushAuthenticatorConstants.REQUEST,
-                params.get(PushAuthenticatorConstants.REQUEST_OBJECT));
-        context.addEndpointParam(PushAuthenticatorConstants.SCOPE,
-                params.get(PushAuthenticatorConstants.SCOPE));
-        context.addEndpointParam(PushAuthenticatorConstants.APPLICATION, serviceProvider.getApplicationName());
-        context.addEndpointParam(PushAuthenticatorConstants.CONSENT_PROMPTED, true);
-        context.addEndpointParam(PushAuthenticatorConstants.AUTH_REQ_ID,
-                context.getAuthenticationRequest().getRequestQueryParams().get(PushAuthenticatorConstants.NONCE)[0]);
-    }
-
-    /**
-     * Returns a map of query parameters from the given query param string.
-     * @param queryParamsString HTTP request query parameters
-     * @return Query parameter map
-     */
-    private Map<String, String> splitQuery(String queryParamsString) throws UnsupportedEncodingException {
-        final Map<String, String> queryParams = new HashMap<>();
-        final String[] pairs = queryParamsString.split("&");
-        for (String pair : pairs) {
-            final int idx = pair.indexOf("=");
-            final String key = idx > 0 ? URLDecoder.decode(pair.substring(0, idx), "UTF-8") : pair;
-            final String value =
-                    idx > 0 && pair.length() > idx + 1 ? URLDecoder.decode(pair.substring(idx + 1), "UTF-8") : null;
-            queryParams.put(key, value);
-        }
-        return queryParams;
-    }
-
-    /**
-     * Retrieve consent from OB database
-     * @param sessionDataKey Session Data Key
-     * @return Response of consent retrieval request
-     */
-    private String retrieveConsent(String sessionDataKey) throws PushAuthenticatorException {
-
-        String hostName = ServerConfiguration.getInstance().getFirstProperty("HostName");
-        int defaultPort = 9443;
-        int port =  defaultPort + Integer.parseInt(ServerConfiguration.getInstance()
-                .getFirstProperty("Ports.Offset"));
-
-        String retrieveUrl = "https://" + hostName + ":" +port +
-                PushAuthenticatorConstants.CONSENT_RETRIEVAL_PATH + sessionDataKey;
-
-        ServerConfiguration.getInstance().getFirstProperty("Ports.Offset");
-
-        String adminUsername;
-        char[] adminPassword;
-        try {
-            RealmConfiguration realmConfiguration = CarbonContext.getThreadLocalCarbonContext().getUserRealm()
-                    .getRealmConfiguration();
-            adminUsername = realmConfiguration.getAdminUserName();
-            adminPassword = realmConfiguration.getAdminPassword().toCharArray();
-        } catch (UserStoreException e) {
-            log.debug("Failed to retrieve admin credentials");
-            throw new PushAuthenticatorException("Failed to retrieve admin credentials");
-        }
-
-        String credentials = adminUsername + ":" + String.valueOf(adminPassword);
-        credentials = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
-
-        CloseableHttpClient client = HttpClientBuilder.create().build();
-        HttpGet dataRequest = new HttpGet(retrieveUrl);
-        dataRequest.addHeader("Authorization", "Basic " + credentials);
-        HttpResponse consentDataResponse = null;
-        try {
-            consentDataResponse = client.execute(dataRequest);
-        } catch (IOException e) {
-            log.debug("Failed to retrieve consent data");
-            throw new PushAuthenticatorException("Failed to retrieve consent data", e);
-        }
-        log.debug("HTTP response for consent retrieval" + consentDataResponse.toString());
-
-        if (consentDataResponse.getStatusLine().getStatusCode() == HttpURLConnection.HTTP_MOVED_TEMP &&
-                consentDataResponse.getLastHeader("Location") != null) {
-            log.debug("Error in consent data retrieval response");
-            throw new PushAuthenticatorException("Failed to retrieve consent data");
-        } else {
-            String consentData;
-            try {
-                consentData = IOUtils.toString(consentDataResponse.getEntity().getContent(),
-                        String.valueOf(StandardCharsets.UTF_8));
-                return consentData;
-            } catch (IOException e) {
-                log.debug("Error in reading consent data retrieval response");
-                throw new PushAuthenticatorException("Failed to read the consent data");
-            }
-        }
-    }
 }
