@@ -19,23 +19,12 @@
 
 package org.wso2.carbon.identity.application.authenticator.push.notification.handler.impl;
 
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.wso2.carbon.base.ServerConfiguration;
-import org.wso2.carbon.context.CarbonContext;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCache;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheEntry;
-import org.wso2.carbon.identity.application.authentication.framework.cache.AuthenticationContextCacheKey;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthenticationContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.AuthenticationFailedException;
 import org.wso2.carbon.identity.application.authentication.framework.inbound.InboundConstants;
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
-import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.authenticator.push.PushAuthenticatorConstants;
 import org.wso2.carbon.identity.application.authenticator.push.common.PushAuthContextManager;
 import org.wso2.carbon.identity.application.authenticator.push.common.impl.PushAuthContextManagerImpl;
@@ -49,13 +38,8 @@ import org.wso2.carbon.identity.application.authenticator.push.exception.PushAut
 import org.wso2.carbon.identity.application.authenticator.push.internal.PushAuthenticatorServiceDataHolder;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.FirebasePushNotificationSender;
 import org.wso2.carbon.identity.application.authenticator.push.notification.handler.RequestSender;
-import org.wso2.carbon.identity.application.common.model.ServiceProvider;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
-import org.wso2.carbon.identity.oauth.cache.SessionDataCache;
-import org.wso2.carbon.identity.oauth.cache.SessionDataCacheEntry;
-import org.wso2.carbon.identity.oauth.cache.SessionDataCacheKey;
-import org.wso2.carbon.user.api.RealmConfiguration;
 import org.wso2.carbon.user.api.UserRealm;
 import org.wso2.carbon.user.api.UserStoreException;
 import org.wso2.carbon.user.api.UserStoreManager;
@@ -65,12 +49,6 @@ import ua_parser.Client;
 import ua_parser.Parser;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.HttpURLConnection;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import javax.servlet.http.HttpServletRequest;
@@ -235,6 +213,5 @@ public class RequestSenderImpl implements RequestSender {
             return null;
         }
     }
-
 
 }

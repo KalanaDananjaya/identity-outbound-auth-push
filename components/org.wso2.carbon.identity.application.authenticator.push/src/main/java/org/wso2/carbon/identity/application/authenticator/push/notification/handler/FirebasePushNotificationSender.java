@@ -115,7 +115,6 @@ public class FirebasePushNotificationSender {
             pushNotificationData.put(PushAuthenticatorConstants.IP_ADDRESS, hostname);
             pushNotificationData.put(PushAuthenticatorConstants.REQUEST_DEVICE_BROWSER, userBrowser);
             pushNotificationData.put(PushAuthenticatorConstants.REQUEST_DEVICE_OS, userOS);
-            // OB specific change to send consent data as metadata in the notification request body
             pushNotificationData.put(PushAuthenticatorConstants.METADATA, metadata);
 
             JSONObject json = new JSONObject();

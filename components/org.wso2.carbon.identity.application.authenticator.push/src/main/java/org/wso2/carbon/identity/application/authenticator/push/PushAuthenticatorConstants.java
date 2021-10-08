@@ -72,8 +72,8 @@ public class PushAuthenticatorConstants {
     public static final String SESSION_DATA_KEY = "sessionDataKey";
     public static final String TOKEN_DEVICE_ID = "did";
     public static final String TOKEN_SESSION_DATA_KEY = "sid";
-    public static final String TOKEN_CHALLENGE = "chg";
     public static final String TOKEN_RESPONSE = "res";
+    public static final String METADATA = "metadata";
 
     public static final String AUTH_DENIED_PARAM = "authorization.denied";
     public static final String AUTH_DENIED_MESSAGE = "authorization.denied.message";
@@ -87,21 +87,4 @@ public class PushAuthenticatorConstants {
 
     public static final String PUSH_AUTHENTICATION_ENDPOINT_WAIT_URL = "pushAuthenticationEndpointWaitURL";
     public static final String PUSH_AUTHENTICATION_ENDPOINT_DEVICES_URL = "pushAuthenticationEndpointDevicesURL";
-
-    public static final String REQUEST = "request";
-    public static final String REQUEST_OBJECT = "request_object";
-
-    //Consent Related constants added specific to OB
-    public static final String LOGGED_IN_USER = "loggedInUser";
-    public static final String USER_TENANT_DOMAIN = "userTenantDomain";
-    public static final String SP_QUERY_PARAMS = "spQueryParams";
-    public static final String SCOPE = "scope";
-    public static final String APPLICATION = "application";
-    public static final String CONSENT_PROMPTED = "consentPrompted";
-    public static final String AUTH_REQ_ID = "auth_req_id";
-    public static final String NONCE = "nonce";
-    public static final String LOGIN_HINT = "login_hint";
-
-    public static final String CONSENT_RETRIEVAL_PATH = "/api/openbanking/consent/authorize/retrieve/";
-    public static final String METADATA = "metadata";
 }
